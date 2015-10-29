@@ -76,7 +76,7 @@ func newGetter(getURL url.URL, c *Config, b *Bucket) (io.ReadCloser, http.Header
 	if err != nil {
 		return nil, nil, err
 	}
-	defer checkClose(resp.Body, &err)
+	defer checkClose(resp.Body, err)
 	if resp.StatusCode != 200 {
 		return nil, nil, newRespError(resp)
 	}
@@ -182,7 +182,7 @@ func (g *getter) getChunk(c *chunk) error {
 	if err != nil {
 		return err
 	}
-	defer checkClose(resp.Body, &err)
+	defer checkClose(resp.Body, err)
 	if resp.StatusCode != 206 {
 		return newRespError(resp)
 	}
@@ -202,6 +202,9 @@ func (g *getter) getChunk(c *chunk) error {
 	// wait for qWait to drain before starting next chunk
 	g.cond.L.Lock()
 	for g.qWaitLen >= qWaitMax {
+		if g.closed {
+			return nil
+		}
 		g.cond.Wait()
 	}
 	g.cond.L.Unlock()
@@ -293,6 +296,8 @@ func (g *getter) Close() error {
 	}
 	g.closed = true
 	close(g.sp.quit)
+	close(g.quit)
+	g.cond.Broadcast()
 	if g.err != nil {
 		return g.err
 	}
@@ -321,7 +326,7 @@ func (g *getter) checkMd5() (err error) {
 	if err != nil {
 		return
 	}
-	defer checkClose(resp.Body, &err)
+	defer checkClose(resp.Body, err)
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("MD5 check failed: %s not found: %s", md5Url.String(), newRespError(resp))
 	}
